@@ -1,0 +1,77 @@
+
+name: Sparta Arena Remastered - Windows Build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    name: Build Windows EXE
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Extract project ZIP
+        shell: pwsh
+        run: |
+          $archive = Get-ChildItem -Path $env:GITHUB_WORKSPACE -Filter "*.zip" -File | Select-Object -First 1
+
+          if (-not $archive) {
+            throw "Proje ZIP dosyası bulunamadı."
+          }
+
+          $destination = Join-Path $env:GITHUB_WORKSPACE "unpacked"
+          Expand-Archive -LiteralPath $archive.FullName -DestinationPath $destination -Force
+
+          $projectFile = Get-ChildItem -Path $destination -Filter "project.godot" -Recurse -File | Select-Object -First 1
+
+          if (-not $projectFile) {
+            throw "ZIP içinde project.godot bulunamadı."
+          }
+
+          $projectDir = $projectFile.DirectoryName
+          Add-Content -Path $env:GITHUB_ENV -Value "PROJECT_DIR=$projectDir"
+
+      - name: Install Godot and export templates
+        uses: chickensoft-games/setup-godot@v2
+        with:
+          version: 4.7.2
+          use-dotnet: false
+          include-templates: true
+
+      - name: Import and check project
+        shell: pwsh
+        run: |
+          godot --headless --editor --path "$env:PROJECT_DIR" --import --quit
+          if ($LASTEXITCODE -ne 0) {
+            throw "Godot proje kontrolü başarısız oldu."
+          }
+
+      - name: Export Windows EXE
+        shell: pwsh
+        run: |
+          $buildDir = Join-Path $env:PROJECT_DIR "build"
+          New-Item -ItemType Directory -Force -Path $buildDir | Out-Null
+
+          $exe = Join-Path $buildDir "SpartaArenaRemastered.exe"
+
+          godot --headless --path "$env:PROJECT_DIR" --export-release "Windows Desktop" "$exe"
+
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path $exe)) {
+            throw "Windows EXE oluşturulamadı."
+          }
+
+      - name: Upload Windows EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: Sparta-Arena-Remastered-Windows
+          path: unpacked/**/build/SpartaArenaRemastered.exe
+          if-no-files-found: error
